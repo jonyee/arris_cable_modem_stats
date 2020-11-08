@@ -31,7 +31,8 @@ def main():
     """ MAIN """
 
     args = get_args()
-    init_logger(args.debug)
+    # init_logger(args.debug)
+    init_logger(True)
 
     config_path = args.config
     config = get_config(config_path, section='MAIN')
@@ -45,17 +46,7 @@ def main():
     if not config['modem_verify_ssl']:
         urllib3.disable_warnings()
 
-    # SB8200 requires authentication on Comcast now
     credential = None
-    if config['modem_auth_required']:
-        # We're doing this in a loop because sometimes the modem refuses to authenticate, we'll keep retrying until it works
-        credential = None
-        while not credential:
-            credential = get_credential(config)
-            if not credential:
-                logging.info('Unable to obtain valid login session, sleeping for: %ss', sleep_interval)
-                time.sleep(sleep_interval)
-
     first = True
     while True:
         if not first:
@@ -63,6 +54,20 @@ def main():
             sys.stdout.flush()
             time.sleep(sleep_interval)
         first = False
+
+        # Handle authentication
+        if config['modem_auth_required']:
+            time.sleep(5)
+            if config['refresh_token']:
+                credential = None
+
+            # We're doing this in a loop because sometimes the modem refuses to authenticate, we'll keep retrying until it works
+            while not credential:
+                time.sleep(5)
+                credential = get_credential(config)
+                if not credential:
+                    logging.info('Unable to obtain valid login session, sleeping for: %ss', sleep_interval)
+                    time.sleep(sleep_interval)
 
         # Get the HTML from the modem
         html = get_html(config, credential)
@@ -114,11 +119,13 @@ def get_config(config_path, section=None):
     if section == 'MAIN':
         config['modem_verify_ssl'] = parser['MAIN'].getboolean('modem_verify_ssl')
         config['modem_auth_required'] = parser['MAIN'].getboolean('modem_auth_required')
+        config['refresh_token'] = parser['MAIN'].getboolean('refresh_token')
 
+    logging.debug('Config: %s', dict(config))
     return config
 
 
-def get_credential(config):
+def get_credential(config, credential=None):
     """ Get the cookie credential by sending the
         username and password pair for basic auth. They
         also want the pair as a base64 encoded get req param
@@ -138,10 +145,24 @@ def get_credential(config):
     auth_url = url + '?' + auth_hash.decode()
     logging.debug('auth_url: %s', auth_url)
 
+    # Build the logout URL
+    url_split = url.split('/')
+    logout_url = '/'.join(url_split[:3]) + '/logout.htm'
+
     # This is going to respond with our "credential", which is a hash that we
     # have to send as a cookie with subsequent requests
     try:
+
+        # Hit the logout page to cause the modem to flush its sessions
+        logging.debug('Requesting logout page to flush sessions')
+        cookies = {'credential': credential}
+        resp = requests.get(logout_url, verify=verify_ssl, cookies=cookies)
+        logging.debug('Logout response code: %s', resp.status_code)
+        logging.debug('Logout response text: %s', resp.text)
+
         resp = requests.get(auth_url, headers=HEADERS, auth=(username, password), verify=verify_ssl)
+        logging.debug('Auth request status code: %s', resp.status_code)
+        logging.debug('Auth request text: %s', resp.text)
 
         if resp.status_code != 200:
             logging.error('Error authenticating with %s', url)
