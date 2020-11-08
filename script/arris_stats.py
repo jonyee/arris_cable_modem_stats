@@ -58,16 +58,16 @@ def main():
         first = False
 
         # Handle authentication
-        if config['modem_auth_required']:
-            if config['refresh_token']:
-                credential = None
+        if config['modem_auth_required'] and config['refresh_token'] and credential:
+            credential = get_credential(config, credential)
 
-            # We're doing this in a loop because sometimes the modem refuses to authenticate, we'll keep retrying until it works
-            while not credential:
-                credential = get_credential(config)
-                if not credential:
-                    logging.info('Unable to obtain valid login session, sleeping for: %ss', sleep_interval)
-                    time.sleep(sleep_interval)
+        # We're doing this in a loop because sometimes the modem refuses to authenticate, we'll keep retrying until it works
+        while not credential and config['modem_auth_required']:
+            credential = get_credential(config)
+
+            if not credential:
+                logging.info('Unable to obtain valid login session, sleeping for: %ss', sleep_interval)
+                time.sleep(sleep_interval)
 
         # Get the HTML from the modem
         html = get_html(config, credential)
@@ -171,7 +171,7 @@ def get_credential(config, credential=None):
             return None
 
         credential = resp.text
-        resp.close()
+
     except Exception as exception:
         logging.error(exception)
         logging.error('Error authenticating with %s', url)
