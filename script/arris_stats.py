@@ -59,13 +59,11 @@ def main():
 
         # Handle authentication
         if config['modem_auth_required']:
-            time.sleep(5)
             if config['refresh_token']:
                 credential = None
 
             # We're doing this in a loop because sometimes the modem refuses to authenticate, we'll keep retrying until it works
             while not credential:
-                time.sleep(5)
                 credential = get_credential(config)
                 if not credential:
                     logging.info('Unable to obtain valid login session, sleeping for: %ss', sleep_interval)
