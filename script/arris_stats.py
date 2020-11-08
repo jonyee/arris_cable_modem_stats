@@ -37,6 +37,9 @@ def main():
     config = get_config(config_path, section='MAIN')
     all_config = get_config(config_path)
 
+    # Re-init the logger in case debug was set in the config file
+    init_logger(config['debug'])
+
     sleep_interval = int(config['sleep_interval'])
     destination = config['destination']
     modem_model = config['modem_model']
@@ -119,8 +122,8 @@ def get_config(config_path, section=None):
         config['modem_verify_ssl'] = parser['MAIN'].getboolean('modem_verify_ssl')
         config['modem_auth_required'] = parser['MAIN'].getboolean('modem_auth_required')
         config['refresh_token'] = parser['MAIN'].getboolean('refresh_token')
+        config['debug'] = parser['MAIN'].getboolean('debug')
 
-    logging.debug('Config: %s', dict(config))
     return config
 
 
@@ -379,6 +382,10 @@ def read_html():
 
 def init_logger(debug=False):
     """ Start the python logger """
+
+    for handler in logging.root.handlers[:]:
+        logging.root.removeHandler(handler)
+
     log_format = '%(asctime)s %(levelname)-8s %(message)s'
 
     if debug:
