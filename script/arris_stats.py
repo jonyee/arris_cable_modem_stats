@@ -156,7 +156,7 @@ def get_credential(config, credential=None):
         # Hit the logout page to cause the modem to flush its sessions
         logging.debug('Requesting logout page to flush sessions')
         cookies = {'credential': credential}
-        resp = requests.get(logout_url, verify=verify_ssl, cookies=cookies)
+        resp = requests.get(logout_url, headers=HEADERS, verify=verify_ssl, cookies=cookies)
         logging.debug('Logout response code: %s', resp.status_code)
         logging.debug('Logout response text: %s', resp.text)
 
