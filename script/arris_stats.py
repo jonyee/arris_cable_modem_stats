@@ -31,8 +31,7 @@ def main():
     """ MAIN """
 
     args = get_args()
-    # init_logger(args.debug)
-    init_logger(True)
+    init_logger(args.debug)
 
     config_path = args.config
     config = get_config(config_path, section='MAIN')
