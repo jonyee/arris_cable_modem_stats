@@ -58,16 +58,11 @@ def main():
         first = False
 
         # Handle authentication
-        if config['modem_auth_required'] and config['refresh_token'] and credential:
+        if config['modem_auth_required'] and not credential or config['refresh_token']:
             credential = get_credential(config, credential)
 
-        # We're doing this in a loop because sometimes the modem refuses to authenticate, we'll keep retrying until it works
-        while not credential and config['modem_auth_required']:
-            credential = get_credential(config)
-
             if not credential:
-                logging.info('Unable to obtain valid login session, sleeping for: %ss', sleep_interval)
-                time.sleep(sleep_interval)
+                logging.error('Unable to obtain authenticate with modem and modem_auth_required is true.')
 
         # Get the HTML from the modem
         html = get_html(config, credential)
@@ -155,7 +150,12 @@ def get_credential(config, credential=None):
 
         # Hit the logout page to cause the modem to flush its sessions
         logging.debug('Requesting logout page to flush sessions')
-        cookies = {'credential': credential}
+
+        if credential:
+            cookies = {'credential': credential}
+        else:
+            cookies = None
+
         resp = requests.get(logout_url, headers=HEADERS, verify=verify_ssl, cookies=cookies)
         logging.debug('Logout response code: %s', resp.status_code)
         logging.debug('Logout response text: %s', resp.text)
@@ -198,6 +198,7 @@ def get_html(config, credential):
         cookies = None
 
     logging.info('Retreiving stats from %s', url)
+    logging.debug('Cookies: %s', cookies)
 
     try:
         resp = requests.get(url, headers=HEADERS, cookies=cookies, verify=verify_ssl)
