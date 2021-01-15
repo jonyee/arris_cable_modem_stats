@@ -1,3 +1,5 @@
+#!/usr/bin/python3
+
 """
     Pull stats from Arris Cable modem's web interface
     Send stats to InfluxDB
@@ -15,6 +17,7 @@ import configparser
 from datetime import datetime
 import urllib3
 import requests
+import json
 
 HEADERS = {
     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
@@ -35,10 +38,6 @@ def main():
 
     config_path = args.config
     config = get_config(config_path, section='MAIN')
-    all_config = get_config(config_path)
-
-    sleep_interval = int(config['sleep_interval'])
-    destination = config['destination']
     modem_model = config['modem_model']
 
     # Disable the SSL warnings if we're not verifying SSL
@@ -56,38 +55,22 @@ def main():
                 logging.info('Unable to obtain valid login session, sleeping for: %ss', sleep_interval)
                 time.sleep(sleep_interval)
 
-    first = True
-    while True:
-        if not first:
-            logging.info('Sleeping for %s seconds', sleep_interval)
-            sys.stdout.flush()
-            time.sleep(sleep_interval)
-        first = False
+    # Get the HTML from the modem
+    html = get_html(config, credential)
+    if not html:
+        logging.error('No HTML to parse')
 
-        # Get the HTML from the modem
-        html = get_html(config, credential)
-        if not html:
-            logging.error('No HTML to parse, giving up until next interval')
-            continue
+    # Parse the HTML to get our stats
+    if modem_model == 'sb8200':
+        stats = parse_html_sb8200(html)
+    else:
+        logging.error('Modem model %s not supported!  Aborting')
+        sys.exit(1)
 
-        # Parse the HTML to get our stats
-        if modem_model == 'sb8200':
-            stats = parse_html_sb8200(html)
-        else:
-            logging.error('Modem model %s not supported!  Aborting')
-            sys.exit(1)
+    if not stats or (not stats['upstream'] and not stats['downstream']):
+        logging.error('Failed to get any stats')
 
-        if not stats or (not stats['upstream'] and not stats['downstream']):
-            logging.error(
-                'Failed to get any stats, giving up until next interval')
-            continue
-
-        # Where should 6we send the results?
-        if destination == 'influxdb':
-            send_to_influx(stats, all_config)
-        else:
-            logging.error('Destination %s not supported!  Aborting.')
-            sys.exit(1)
+    print(json.dumps(stats))
 
 
 def get_args():
@@ -272,76 +255,6 @@ def parse_html_sb8200(html):
         logging.error('Failed to get any upstream stats! Probably a parsing issue in parse_html_sb8200()')
 
     return stats
-
-
-def send_to_influx(stats, config):
-    """ Send the stats to InfluxDB """
-    logging.info('Sending stats to InfluxDB (%s:%s)', config['INFLUXDB']['host'], config['INFLUXDB']['port'])
-
-    from influxdb import InfluxDBClient
-    from influxdb.exceptions import InfluxDBClientError, InfluxDBServerError
-
-    influx_client = InfluxDBClient(
-        config['INFLUXDB']['host'],
-        config['INFLUXDB']['port'],
-        config['INFLUXDB']['username'],
-        config['INFLUXDB']['password'],
-        config['INFLUXDB']['database'],
-        config['INFLUXDB'].getboolean('use_ssl', fallback=False),
-        config['INFLUXDB'].getboolean('verify_ssl', fallback=True)
-    )
-
-    series = []
-    current_time = datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ')
-
-    for stats_down in stats['downstream']:
-
-        series.append({
-            'measurement': 'downstream_statistics',
-            'time': current_time,
-            'fields': {
-                'frequency': int(stats_down['frequency']),
-                'power': float(stats_down['power']),
-                'snr': float(stats_down['snr']),
-                'corrected': int(stats_down['corrected']),
-                'uncorrectables': int(stats_down['uncorrectables'])
-            },
-            'tags': {
-                'channel_id': int(stats_down['channel_id'])
-            }
-        })
-
-    for stats_up in stats['upstream']:
-        series.append({
-            'measurement': 'upstream_statistics',
-            'time': current_time,
-            'fields': {
-                'frequency': int(stats_up['frequency']),
-                'power': float(stats_up['power']),
-            },
-            'tags': {
-                'channel_id': int(stats_up['channel_id'])
-            }
-        })
-
-    try:
-        influx_client.write_points(series)
-    except (InfluxDBClientError, ConnectionError, InfluxDBServerError) as exception:
-
-        # If DB doesn't exist, try to create it
-        if hasattr(exception, 'code') and exception.code == 404:
-            logging.warning('Database %s Does Not Exist.  Attempting to create database',
-                            config['INFLUXDB']['database'])
-            influx_client.create_database(config['INFLUXDB']['database'])
-            influx_client.write_points(series)
-        else:
-            logging.error(exception)
-            logging.error('Failed To Write To InfluxDB')
-            return
-
-    logging.info('Successfully wrote data to InfluxDB')
-    logging.debug('Influx series sent to db:')
-    logging.debug(series)
 
 
 def write_html(html):
